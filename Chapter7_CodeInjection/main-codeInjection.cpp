@@ -10,6 +10,34 @@ DWORD printStringManyTimes(int times, const char* string)
 	return 0;
 }
 
+DWORD getPIDByName(std::wstring name)
+{
+	DWORD PID = -1;
+
+	PROCESSENTRY32 entry;
+	entry.dwSize = sizeof(PROCESSENTRY32);
+
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+
+	if (Process32First(snapshot, &entry) == TRUE)
+	{
+		while (Process32Next(snapshot, &entry) == TRUE)
+		{
+			std::wstring binaryPath = entry.szExeFile;
+			if (binaryPath.find(name) != std::wstring::npos)
+			{
+				PID = entry.th32ProcessID;
+				printf("\nprocess found\n");
+				break;
+			}
+		}
+	}
+
+	CloseHandle(snapshot);
+	return PID;
+}
+
+
 
 void injectCodeUsingThreadInjection(HANDLE process, LPVOID func, int times, const char* string)
 {
@@ -69,63 +97,9 @@ DWORD GetProcessThreadID(HANDLE Process)
 }
 
 
-
-void injectCodeUsingThreadHijacking(HANDLE process, LPVOID func, int times, const char* string)
-{
-	BYTE codeCave[31] = {
-		0x60, //PUSHAD
-		0x9C, //PUSHFD
-		0x68, 0x00, 0x00, 0x00, 0x00, // PUSH 0
-		0x68, 0x00, 0x00, 0x00, 0x00, // PUSH 0
-		0xB8, 0x00, 0x00, 0x00, 0x00, // MOV EAX, 0x0
-		0xFF, 0xD0, // CALL EAX
-		0x83, 0xC4, 0x08, // ADD ESP, 0x08
-		0x9D, //POPFD
-		0x61, //POPAD
-		0x68, 0x00, 0x00, 0x00, 0x00, // PUSH 0
-		0xC3 // RETN
-	};
-
-	// allocate memory for the coe cave
-	int stringlen = strlen(string) + 1;
-	int fulllen = stringlen + sizeof(codeCave);
-	LPVOID remoteString = VirtualAllocEx(process, NULL, fulllen, MEM_COMMIT, PAGE_EXECUTE);
-	LPVOID remoteCave = (LPVOID)((DWORD)remoteString + stringlen);
-
-	// suspend the thread and query its control context
-	DWORD threadID = GetProcessThreadID(process);
-	HANDLE thread = OpenThread((THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_SET_CONTEXT), false, threadID);
-	SuspendThread(thread);
-
-	CONTEXT threadContext;
-	threadContext.ContextFlags = CONTEXT_CONTROL;
-	GetThreadContext(thread, &threadContext);
-
-	// copy values to the shellcode (happens late because we need values from allocation)
-	memcpy(&codeCave[3], &remoteString, 4);
-	memcpy(&codeCave[8], &times, 4);
-	memcpy(&codeCave[13], &func, 4);
-	memcpy(&codeCave[25], &threadContext.Eip, 4);
-
-
-	// write the code cave
-	WriteProcessMemory(process, remoteString, string, stringlen, NULL);
-	WriteProcessMemory(process, remoteCave, codeCave, sizeof(codeCave), NULL);
-
-
-	//hijack the thread
-	threadContext.Eip = (DWORD)remoteCave;
-	threadContext.ContextFlags = CONTEXT_CONTROL;
-	SetThreadContext(thread, &threadContext);
-	ResumeThread(thread);
-
-	//clean
-	CloseHandle(thread);
-}
-
 DWORD WINAPI hijackThread(LPVOID lpParam)
 {
-	injectCodeUsingThreadHijacking((HANDLE)lpParam, &printStringManyTimes, 2, "hijacked\n");
+	//injectCodeUsingThreadHijacking((HANDLE)lpParam, &printStringManyTimes, 2, "hijacked\n");
 	return 1;
 }
 
@@ -145,6 +119,8 @@ void LoadDll(HANDLE process, const wchar_t* dllPath)
 	HANDLE thread =
 		CreateRemoteThread(process, NULL, NULL, (LPTHREAD_START_ROUTINE)funcAdr, remoteString, NULL, NULL);
 	
+	printf("thread good? %d\n", thread != NULL);
+
 	// let the thread finish and clean up
 	WaitForSingleObject(thread, INFINITE);
 	CloseHandle(thread);
@@ -152,10 +128,11 @@ void LoadDll(HANDLE process, const wchar_t* dllPath)
 
 int main(void)
 {
-	HANDLE proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+	DWORD pid = getPIDByName(L"Spotify.exe");
+	HANDLE proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 
 	// inject code into self using thread injection
-	injectCodeUsingThreadInjection(proc, &printStringManyTimes, 2, "injected\n");
+	//injectCodeUsingThreadInjection(proc, &printStringManyTimes, 2, "injected\n");
 
 	// inject code into self using thread hijacking
 	//   we need to do it from a secondary thread or else
@@ -163,7 +140,7 @@ int main(void)
 	//   doesn't work
 	CreateThread(NULL, 0, hijackThread, proc, 0, NULL); 
 
-	LoadDll(proc, L"Chapter7_CodeInjection_DLL.dll");
+	LoadDll(proc, L"C:\\Users\\alexbernier11\\Documents\\Chapter7_CodeInjection\\bin\\DEBUG_BUILDS\\Chapter7_CodeInjection_DLL.dll");
 
 
 	while (true) // stay busy
