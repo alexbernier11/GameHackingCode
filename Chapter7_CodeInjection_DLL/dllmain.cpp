@@ -2,7 +2,15 @@
 
 
 DWORD WINAPI runBot(LPVOID lpParam) {
-    // run your bot
+    
+
+
+	int index1 = GetCurrentProcessId();
+	char buf[10];
+	char* d = &buf[0];
+	itoa(index1, d, 10);
+	MessageBoxA(NULL, buf, "l33t", MB_OK);
+
     return 1;
 }
 
